@@ -380,3 +380,146 @@ kubcetl get nodes
 </details>
 
 *****
+
+<details>
+<summary>Video: 4 - Create Fargate Profile for EKS Cluster</summary>
+<br />
+
+With Fargate you let AWS manage the worker nodes too. You won't create any EC2 instances in your account. An important difference between Fargate and creating your own EC2 worker nodes is, that Fargate will create one virtual machine per Pod resulting in some limitation with using Fargate:
+- there is no support for stateful applications yet
+- there is no support for Daemon Sets (applications running on every node)
+
+Note that we can have both Fargate and Node Group atached to our EKS cluster.
+
+### Create an IAM Role for Fargate
+Kubelet on servers provisioned by Fargate need to call AWS services, pull the container images from ECR etc. So just as we did for the EC2 instances in the Node Group we need to create a role for the Fargate servers and attach the required permissions to it.
+
+Open your browser and login to your account of the [AWS Management Console](https://eu-central-1.console.aws.amazon.com/console/home?region=eu-central-1#). Open the IAM dashboard (Services > Security, Identity & Compliance > IAM) and click on Access Management > Roles in the menu on the left. Press the "Create role" button, select "AWS service" as the trusted entity type, select "EKS" from the dropdown at the bottom (Use cases for other AWS services), select "EKS - Fargate pod" and press the "Next" button.
+
+'AmazonEKSFargatePodExecutionRolePolicy' is the only policy set. Press the "Next" button.
+
+Enter a role name (e.g. 'eks-fargate-role') and press "Create role".
+
+### Create Fargate Profile
+A Fargate profile creates a Pod selection rule which defines how new pods should be scheduled. If for example there is also a node group, the selection rule specifies which pod should be scheduled by Fargate and which by the node group.
+
+To create a Fargate profile go to the EKS dashboard, navigate to the clusters overview, click on the cluster 'eks-cluster-test', open the "Compute" tab, scroll down to the "Fargate profiles" section and press the "Add Fargate profile" button.
+
+Enter a name (e.g. dev-profile) and select the 'eks-fargate-role' we just created. Below that we can select the  subnets to be used from our VPC. Even if we won't see the virtual machines provisioned by Fargate, the Pods running on these VMs will get IP addresses from our subnet IP range. Make sure only the private subnets are selected (the public subnets should not be selectable). Press "Next".
+
+Now we configure the pod selection rule mentioned before. We can let Fargate schedule Pods of certain namespaces and/or having certain labels. Let's use both possibilities. Add 'dev' into the namespace textfield and add a label 'profile:fargate' (key:value). Press "Next", review your entries and press "Create". The Fargate profile 'dev-profile' is in status "Creating" now and will change to "Active" after a few minutes.
+
+### Deploy first Pod through Fargate
+If we want our nginx Pods to be scheduled by Fargate, we have to add the namespace and label specified in the Pod selection rule to its K8s deployment configuration file. Create a new `nginx-deployment.yaml` file with the following content:
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+  namespace: dev # <---
+spec:
+  selector:
+    matchLabels:
+      app: nginx
+      profile: fargate # <---
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: nginx
+        profile: fargate # <---
+    spec:
+      containers:
+      - name: nginx
+        image: nginx
+        ports:
+        - containerPort: 80
+```
+
+Now execute the following commands:
+
+```sh
+# create the namespace
+kubectl create namespace dev
+
+# apply the deployment configuration
+kubectl apply -f nginx-deployment.yaml
+
+# check the pod is running
+kubectl get pods -n dev -w
+# NAME                     READY   STATUS              RESTARTS   AGE
+# nginx-7f5bb7bcc5-x5bwh   0/1     Pending             0          7s
+# nginx-7f5bb7bcc5-x5bwh   0/1     Pending             0          35s
+# nginx-7f5bb7bcc5-x5bwh   0/1     ContainerCreating   0          36s
+# nginx-7f5bb7bcc5-x5bwh   1/1     Running             0          43s
+```
+
+The pod was pending for 35 seconds because Fargate creates a virtual machine for each pod, which takes some time.
+
+Now let's see the nodes:
+```sh
+kubectl get nodes
+# NAME                                                       STATUS   ROLES    AGE     VERSION
+# fargate-ip-192-168-164-158.eu-central-1.compute.internal   Ready    <none>   2m57s   v1.26.3-eks-f4dc2c0
+# ip-192-168-222-24.eu-central-1.compute.internal            Ready    <none>   3d4h    v1.26.2-eks-a59e1f0
+```
+
+The first node is the newly created virtual machine. We don't see it in our AWS account. But still it got an IP address from the range of a subnet in our VPC. The second one is the EC2 instance created by the node group in demo project #1. We can see this instance in our AWS account.
+
+For illustrating purposes let's change the namespace in the nginx-deployment.yaml to `default`, set the replicas to `2` and the deployment name to `nginx-test` (because we already have an nginx deployment in the default namespace).
+
+Re-apply the configuration:
+```sh
+kubectl apply -f nginx-deployment.yaml
+
+# check the pods are running
+kubectl get pods -n default -o wide
+# NAME                          READY   STATUS    RESTARTS   AGE   IP                NODE                                              NOMINATED NODE   READINESS GATES
+# nginx-7f456874f4-2pxn7        1/1     Running   0          2d    192.168.250.72    ip-192-168-222-24.eu-central-1.compute.internal   <none>           <none>
+# nginx-test-7f5bb7bcc5-6z5cw   1/1     Running   0          7s    192.168.222.107   ip-192-168-222-24.eu-central-1.compute.internal   <none>           <none>
+# nginx-test-7f5bb7bcc5-gprnf   1/1     Running   0          7s    192.168.210.122   ip-192-168-222-24.eu-central-1.compute.internal   <none>           <none>
+```
+
+As we can see all three pods (the old one created in demo project #1 and the two new replicas created just now) are running on the same node (with IP address 192-168-222-24).
+
+And now let's change the namespace back to `dev` and the deployment name to `nginx-dev` and re-apply it:
+```sh
+kubectl apply -f nginx-deployment.yaml
+
+# check the pods are running
+kubectl get pods -n dev -w
+# NAME                         READY   STATUS              RESTARTS   AGE
+# nginx-7f5bb7bcc5-x5bwh       1/1     Running             0          25m
+# nginx-dev-7f5bb7bcc5-m4g8r   0/1     Pending             0          13s
+# nginx-dev-7f5bb7bcc5-wmhgd   0/1     Pending             0          13s
+# nginx-dev-7f5bb7bcc5-m4g8r   0/1     Pending             0          37s
+# nginx-dev-7f5bb7bcc5-wmhgd   0/1     Pending             0          37s
+# nginx-dev-7f5bb7bcc5-m4g8r   0/1     ContainerCreating   0          37s
+# nginx-dev-7f5bb7bcc5-wmhgd   0/1     ContainerCreating   0          37s
+# nginx-dev-7f5bb7bcc5-wmhgd   1/1     Running             0          44s
+# nginx-dev-7f5bb7bcc5-m4g8r   1/1     Running             0          46s
+
+kubectl get pods -n dev -o wide
+# NAME                         READY   STATUS    RESTARTS   AGE    IP                NODE                                                       NOMINATED NODE   READINESS GATES
+# nginx-7f5bb7bcc5-x5bwh       1/1     Running   0          27m    192.168.164.158   fargate-ip-192-168-164-158.eu-central-1.compute.internal   <none>           <none>
+# nginx-dev-7f5bb7bcc5-m4g8r   1/1     Running   0          107s   192.168.183.201   fargate-ip-192-168-183-201.eu-central-1.compute.internal   <none>           <none>
+# nginx-dev-7f5bb7bcc5-wmhgd   1/1     Running   0          107s   192.168.159.165   fargate-ip-192-168-159-165.eu-central-1.compute.internal   <none>           <none>
+
+kubectl get nodes
+# NAME                                                       STATUS   ROLES    AGE     VERSION
+# fargate-ip-192-168-159-165.eu-central-1.compute.internal   Ready    <none>   3m48s   v1.26.3-eks-f4dc2c0
+# fargate-ip-192-168-164-158.eu-central-1.compute.internal   Ready    <none>   29m     v1.26.3-eks-f4dc2c0
+# fargate-ip-192-168-183-201.eu-central-1.compute.internal   Ready    <none>   3m48s   v1.26.3-eks-f4dc2c0
+# ip-192-168-222-24.eu-central-1.compute.internal            Ready    <none>   3d4h    v1.26.2-eks-a59e1f0
+```
+
+We see that all the three pods in the 'dev' namespace are running on three different nodes.
+
+### Cleanup Cluster Resources
+When we want to delete the EKS cluster we first have to delete the Node Group(s) and Fargate Profile(s) attached to it. Go to the EKS dashboard, navigate to the clusters overview, click on the cluster 'eks-cluster-test', open the "Compute" tab, scroll down to the "Node groups" and "Fargate profiles" sections, select the group/profile you want to delete and press the "Delete" button". As soon as all Node Groups and Fargate Profiles attached to the cluster are deleted (which may take some time) you can delete the cluster itself. Press the "Delete cluster" button.
+
+Once the cluster has been deleted, we can delete the three roles 'eks-cluster-role', 'eks-node-group-role' and 'eks-fargate-role'. Go to the IAM dashboard, open the roles overview and delete the three roles. The custom 'node-group-autoscale-policy' won't be deleted by this. If you wanted to delete it too, you would have to do it separately.
+
+</details>
+
+*****
