@@ -523,3 +523,103 @@ Once the cluster has been deleted, we can delete the three roles 'eks-cluster-ro
 </details>
 
 *****
+
+<details>
+<summary>Video: 5 - Create EKS cluster with eksctl command line tool</summary>
+<br />
+
+Manually creating an EKS cluster using the AWS Management Console is a rather inefficient way of doing it. Using AWS CLI we could do the same and assemble the commands in a script to reduce the work for doing it repeatedly. But the most efficient way of creating an EKS cluster is using the `eksctl` command line tool which automates many individual tasks. It allows to create a cluster with just one command. All the necessary components are created and configured in the background. CLI options let you customize the cluster to be created.
+
+### Install eksctl on a Mac M2
+```sh
+ARCH=arm64
+PLATFORM=$(uname -s)_$ARCH
+
+curl -sLO "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$PLATFORM.tar.gz"
+
+# (Optional) Verify checksum
+curl -sL "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_checksums.txt" | grep $PLATFORM | shasum -a 256 --check
+# => eksctl_Darwin_arm64.tar.gz: OK
+
+tar -xzf eksctl_$PLATFORM.tar.gz -C /tmp && rm eksctl_$PLATFORM.tar.gz
+
+sudo mv /tmp/eksctl /usr/local/bin
+```
+
+Or using homebrew:
+```sh
+brew tap weaveworks/tap
+brew install weaveworks/tap/eksctl
+```
+
+### Connect eksctl With AWS Account
+If you already have configured credentials for awscli you can use the same configuration for eksctl. If you haven't you must do it first. We have to tell eksctl with which account and which user we want to connect. Get the file, that was downloaded when you created the access key for the admin user and execute the following command:
+
+```sh
+aws configure
+  AWS Access Key ID [None]: # enter the AWS access key id from the downloaded .csv file
+  AWS Secret Access Key [None]: # enter the AWS secret access key from the downloaded .csv file
+  Default region name [None]: eu-central-1 # Frankfurt (eu-west-3 for Paris)
+  Default output format [None]: json
+```
+
+This configuration will be used for all subsequent eksctl (or awscli) commands. The configuration itself is stored in `~/.aws/config` and `~/.aws/credentials`.
+
+### Create an EKS Cluster
+You can either use the `eksctl create cluster` command with all the configuration options you need, or you can write a configuration yaml file and apply it using the command `eksctl create cluster -f <config.yaml>`. Examples of configuration files can be found [here](https://github.com/weaveworks/eksctl/tree/main/examples).
+
+For this demo we use the command options, so execute the following command:
+```sh
+eksctl create cluster \
+  --name demo-cluster \
+  --version 1.26 \
+  --region eu-central-1 \
+  --nodegroup-name demo-nodes \
+  --node-type t2.micro \
+  --nodes 2 \
+  --nodes-min 1 \
+  --nodes-max 3
+# =>
+# 2023-05-18 15:36:18 [ℹ]  eksctl version 0.141.0
+# 2023-05-18 15:36:18 [ℹ]  using region eu-central-1
+# 2023-05-18 15:36:18 [ℹ]  setting availability zones to [eu-central-1c eu-central-1b eu-central-1a]
+# 2023-05-18 15:36:18 [ℹ]  subnets for eu-central-1c - public:192.168.0.0/19 private:192.168.96.0/19
+# 2023-05-18 15:36:18 [ℹ]  subnets for eu-central-1b - public:192.168.32.0/19 private:192.168.128.0/19
+# 2023-05-18 15:36:18 [ℹ]  subnets for eu-central-1a - public:192.168.64.0/19 private:192.168.160.0/19
+# 2023-05-18 15:36:18 [ℹ]  nodegroup "demo-nodes" will use "" [AmazonLinux2/1.26]
+# 2023-05-18 15:36:18 [ℹ]  using Kubernetes version 1.26
+# 2023-05-18 15:36:18 [ℹ]  creating EKS cluster "demo-cluster" in "eu-central-1" region with managed nodes
+# ...
+# 2023-05-18 15:55:55 [ℹ]  kubectl command should work with "/Users/fsiegrist/.kube/config", try 'kubectl get nodes'
+# 2023-05-18 15:55:55 [✔]  EKS cluster "demo-cluster" in "eu-central-1" region is ready
+
+```
+
+As you see this command takes nearly 20 minutes to complete. Kubectl was automatically configured to connect to the created cluster. The configuration was stored in `~/.kube/config`. If you had other cluster configured in this file, the configuration for the new cluster was just added. So you don't lose existing configurations.
+
+Let's review the created cluster now. 
+
+```sh
+eksctl get clusters
+# NAME	        REGION        EKSCTL CREATED
+# demo-cluster  eu-central-1  True
+
+kubectl get nodes
+# NAME                                              STATUS   ROLES    AGE     VERSION
+# ip-192-168-48-96.eu-central-1.compute.internal    Ready    <none>   6m12s   v1.26.2-eks-a59e1f0
+# ip-192-168-64-248.eu-central-1.compute.internal   Ready    <none>   6m11s   v1.26.2-eks-a59e1f0
+```
+
+Login to your account in the AWS Management Console and check the following resources:
+- IAM roles
+- VPCs and Subnets
+- EKS
+
+### Links
+- [eksctl.io](https://eksctl.io)
+- [eksctl installation guide](https://github.com/weaveworks/eksctl#installation)
+- [eksctl getting started](https://eksctl.io/introduction/#getting-started)
+
+</details>
+
+*****
