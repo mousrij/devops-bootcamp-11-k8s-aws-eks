@@ -623,3 +623,248 @@ Login to your account in the AWS Management Console and check the following reso
 </details>
 
 *****
+
+<details>
+<summary>Video: 6 - Deploy to EKS Cluster from Jenkins Pipeline</summary>
+<br />
+
+The following steps are needed to be able to deploy to our EKS demo cluster created in the last video from a Jenkins pipeline:
+- install kubectl command line tool inside Jenkins container
+- install aws-iam-authenticator tool inside Jenkins container (Jenkins does not only have to authenticate against the EKS cluster but also against AWS; the aws-iam-authenticator tool was installed on our local machine when we created the EKS cluster using the eksctl command)
+- create a kubeconfig file to connect to the EKS cluster
+- add AWS credentials (AWS user and secret access key) on Jenkins for AWS account authentication
+- adjust Jenkinsfile to configure EKS cluster deployment
+
+### Install kubectl on Jenkins Server
+SSH into the DigitalOcean droplet where Jenkins is running:
+```sh
+ssh root@<jenkins-droplet-ip>
+
+# make sure jenkins is running
+docker ps
+
+# enter the container as root to be able to install kubectl
+docker exec -u 0 -it <jenkins-container-id> bash
+
+# get the current command to install kubectl from https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/
+
+# download the latest kubectl release
+curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+
+# download the kubectl checksum file
+curl -LO "https://dl.k8s.io/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl.sha256"
+
+# validate the kubectl binary against the checksum file
+echo "$(cat kubectl.sha256) kubectl" | sha256sum --check
+# => kubectl: OK
+
+# install kubectl
+install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+
+# test to ensure the version you installed is up-to-date
+kubectl version --output=yaml
+
+# remove no longer needed files
+rm kubectl
+rm kubectl.sha256
+```
+
+### Install AWS IAM Authenticator
+SSH into the DigitalOcean droplet where Jenkins is running:
+```sh
+ssh root@<jenkins-droplet-ip>
+
+# make sure jenkins is running
+docker ps
+
+# enter the container as root to be able to install aws-iam-authenticator
+docker exec -u 0 -it <jenkins-container-id> bash
+
+# get the current command to install aws-iam-authenticator from https://docs.aws.amazon.com/eks/latest/userguide/install-aws-iam-authenticator.html
+
+# Download the aws-iam-authenticator binary
+curl -Lo aws-iam-authenticator https://github.com/kubernetes-sigs/aws-iam-authenticator/releases/download/v0.5.9/aws-iam-authenticator_0.5.9_linux_amd64
+
+# download the sha256 checksum file
+curl -Lo aws-iam-authenticator.txt https://github.com/kubernetes-sigs/aws-iam-authenticator/releases/download/v0.5.9/authenticator_0.5.9_checksums.txt
+
+# validate the kubectl binary against the checksum file
+echo "$(awk '/aws-iam-authenticator_0.5.9_linux_amd64/ {print $1}' aws-iam-authenticator.txt) aws-iam-authenticator" | sha256sum --check
+# => aws-iam-authenticator: OK
+
+# install aws-iam-authenticator
+install -o root -g root -m 0755 aws-iam-authenticator /usr/local/bin/aws-iam-authenticator
+
+# test that the aws-iam-authenticator binary works
+aws-iam-authenticator help
+
+# remove no longer needed files
+rm aws-iam-authenticator
+rm aws-iam-authenticator.txt
+```
+
+### Create a kubeconfig File for Jenkins
+Inside the Jenkins Docker container we don't have an editor available, so we create the kubeconfig file outside the container (on the DigitalOcean droplet) and copy it into the container.
+
+But to get the content of the file, we create it on our local machine where aws-cli is installed. So go to your local machine and make sure the environment variable `KUBECONFIG` is not set or points to `~/.kube/config`. Also make sure the `~/.kube/config` file contains no configuration (if you need it, copy it to somewhere else or rename it). The config file should just look like this:
+```yaml
+apiVersion: v1
+clusters: []
+contexts: []
+current-context: ""
+kind: Config
+preferences: {}
+users: []
+```
+
+Now execute the following command (replace the region if necessary):
+```sh
+aws eks update-kubeconfig --region eu-central-1 --name demo-cluster
+# => Added new context arn:aws:eks:eu-central-1:<account-id>:cluster/demo-cluster to ~/.kube/config
+```
+
+Now SSH into the DigitalOcean droplet where Jenkins is running:
+```sh
+ssh root@<jenkins-droplet-ip>
+```
+
+Create a file called `config` with the content of the `~/.kube/config` file on your local machine. It looks like this:
+```yaml
+apiVersion: v1
+clusters:
+- cluster:
+    certificate-authority-data: LS0tLS1...S0tCg==
+    server: https://7494867E92D8A843B06C6932C8E6D4CD.gr7.eu-central-1.eks.amazonaws.com
+  name: arn:aws:eks:eu-central-1:<account-id>:cluster/demo-cluster
+contexts:
+- context:
+    cluster: arn:aws:eks:eu-central-1:<account-id>:cluster/demo-cluster
+    user: arn:aws:eks:eu-central-1:<account-id>:cluster/demo-cluster
+  name: arn:aws:eks:eu-central-1:<account-id>:cluster/demo-cluster
+current-context: arn:aws:eks:eu-central-1:<account-id>:cluster/demo-cluster
+kind: Config
+preferences: {}
+users:
+- name: arn:aws:eks:eu-central-1:<account-id>:cluster/demo-cluster
+  user:
+    exec:
+      apiVersion: client.authentication.k8s.io/v1beta1
+      args:
+      - --region
+      - eu-central-1
+      - eks
+      - get-token
+      - --cluster-name
+      - demo-cluster
+      command: aws
+```
+
+In the Jenkins container we don't have aws-cli installed, so we have to replace the command `aws eks get-token --region eu-central-1 --cluster-name demo-cluster` which will be called with every `kubectl` command to authenticate against the AWS account and the EKS cluster with a respective `aws-iam-authenticator token -i demo-cluster` command. So replace the `exec` section in the file with the following:
+```yaml
+    exec:
+      apiVersion: client.authentication.k8s.io/v1beta1
+      command: aws-iam-authenticator
+      args:
+        - "token"
+        - "-i"
+        - "demo-cluster"
+```
+
+Now enter the Jenkins container as jenkins user:
+```sh
+docker exec -it <jenkins-container-id> bash
+# => jenkins@<jenkins-container-id>:/$
+
+# navigate to home directory
+cd ~
+pwd
+# /var/jenkins_home
+
+# create a .kube directory
+mkdir .kube
+
+# leave the Jenkins container
+exit
+```
+
+Now copy the created config file into the Jenkins container:
+```sh
+docker cp config <jenkins-container-id>:/var/jenkins_home/.kube/
+```
+
+To change the owner of the file from root to jenkins we enter the Jenkins container as root user:
+```sh
+docker exec -it -u 0 <jenkins-container-id> bash
+chown jenkins:jenkins /var/jenkins_home/.kube/config
+```
+
+### Create AWS Credentials
+Jenkins needs to know the credentials of the AWS user. In a real project we would create a specific jenkins user on our AWS account with less privileges than an admin user. But for this demo we just add the credentials of the admin user to the Jenkins configuration.
+
+Login to your Jenkins account (running on DigitalOcean) and navigate to Dashboard > devops-bootcamp-multibranch-pipeline > Credentials > devops-bootcamp-multibranch-pipeline > Global credentials (unrestricted) and press "Add Credentials". Select the Kind 'Secret text' and enter 'jenkins-aws_access_key_id' in the 'ID' text field and the aws_access_key_id from your local `~/.aws/credentials` file in the 'Secret' text field. Press the "Create" button. Press "Add Credentials" again and do the same with the aws_secret_access_key.
+
+### Configure Jenkinsfile to deploy to EKS
+Go to the sample application 'java-maven-app' and create a new branch 'deploy-on-eks'. Open the Jenkinsfile and replace its content with the following:
+```groovy
+#!/usr/bin/env groovy
+
+pipeline {
+    agent any
+    stages {
+        stage('build app') {
+            steps {
+               script {
+                   echo "building the application..."
+               }
+            }
+        }
+        stage('build image') {
+            steps {
+                script {
+                    echo "building the docker image..."
+                }
+            }
+        }
+        stage('deploy') {
+            environment {
+               AWS_ACCESS_KEY_ID = credentials('jenkins-aws_access_key_id')
+               AWS_SECRET_ACCESS_KEY = credentials('jenkins-aws_secret_access_key')
+            }
+            steps {
+                script {
+                   echo 'deploying docker image...'
+                   sh 'kubectl create deployment nginx-deployment --image=nginx'
+                }
+            }
+        }
+    }
+}
+```
+
+As you can see we just use the 'deploy' stage where we execute a `kubectl` command to create an nginx deployment. If we execute `kubectl` commands on our local machine, authentication against AWS is done using the file `~/.aws/credentials`. Another possibility is to set environment variables `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` containing the same information. As we don't have an `~/.aws/credentials` file in the Jenkins container, we set the two environment variables. The values are taken from the two 'secret text' credentials we just created.
+
+Now when the `kubectl` command is executed, it looks up the kubeconfig file `~/.kube/config` to get the cluster endpoint and cluster authentication data. There it also finds the `aws-iam-authenticator` command to authenticate against AWS. The `aws-iam-authenticator` command needs the AWS credentials (aws-access-key-id and aws-secret-access-key) to do its job.
+
+Note that the aws-iam-authenticator related steps are specific to AWS. On other platforms it would be sufficient to have the kubeconfig file to connect and authenticate with the K8s cluster.
+
+Add, commit and push the new branch to the Git repository.
+
+### Execute Jenkins Pipeline
+If we have configured the multibranch pipeline on Jenkins to build all branches, the new branch will be automatically detected, a new pipeline will be created and the build will be automatically started.
+
+After it has successfully finished, open a terminal on your local machine and check the deployment:
+```sh
+kubectl get pods
+# NAME                                READY   STATUS    RESTARTS   AGE
+# nginx-deployment-55888b446c-bflcs   1/1     Running   0          2m41s
+```
+
+### Links
+- [Install kubectl](https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/)
+- [EKS Cluster Authentication](https://docs.aws.amazon.com/eks/latest/userguide/cluster-auth.html)
+- [Create kubeconfig File](https://docs.aws.amazon.com/eks/latest/userguide/create-kubeconfig.html)
+- [Install AWS IAM Authenticator](https://docs.aws.amazon.com/eks/latest/userguide/install-aws-iam-authenticator.html)
+
+</details>
+
+*****
