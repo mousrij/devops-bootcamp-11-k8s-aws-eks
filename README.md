@@ -12,4 +12,6 @@ And finally it contains the following demo projects:
 - [Create AWS EKS Cluster with a Node Group](./demo-projects/1-create-eks-cluster-node-group/)
 - [Create AWS EKS Cluster with a Fargate Profile](./demo-projects/2-create-eks-cluster-fargate/)
 - [Create AWS EKS Cluster with eksctl](./demo-projects/3-create-eks-cluster-eksclt/)
+- [Deploy to EKS Cluster from Jenkins Pipeline](./demo-projects/4-deploy-to-eks-from-jenkins/)
+- [Deploy to LKE Cluster from Jenkins Pipeline](./demo-projects/5-deploy-to-lke-from-jenkins/)
 
