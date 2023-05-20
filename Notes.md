@@ -962,3 +962,157 @@ Instead of configuring credentials on Jenkins for our various admin users (e.g. 
 </details>
 
 *****
+
+<details>
+<summary>Video: 9 - Complete CI/CD Pipeline with EKS and DockerHub</summary>
+<br />
+
+We would like to replace the deploy stage in the Jenkinsfile of the 'java-maven-app', where we deployed the application on an EC2 instance using `scp` and `ssh` to copy and execute a docker-compose file and a shell script, with our new deploy stage, where we deploy the application to an EKS cluster using `kubcetl`.
+
+So switch to the 'java-maven-app' project and create a new Git branch called 'complete-pipeline-eks-dockerhub'.
+
+### Create Deployment and Service Configuration Files
+Create a new folder called `kubernetes` and within this folder two files `deployment.yaml` and `service.yaml` with the following content:
+
+_kubernetes/deployment.yaml_
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: $APP_NAME
+  labels:
+    app: $APP_NAME
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: $APP_NAME
+  template:
+    metadata:
+      labels:
+        app: $APP_NAME
+    spec:
+      imagePullSecrets:
+        - name: ...
+      containers:
+        - name: $APP_NAME
+          image: fsiegrist/fesi-repo:devops-bootcamp-java-maven-app-${IMAGE_TAG}
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+```
+
+_kubernetes/service.yaml_
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: $APP_NAME
+spec:
+  selector:
+    app: $APP_NAME
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8080
+```
+
+### Adjust Jenkinsfile
+The `IMAGE_TAG` environment variable gets already set in the 'Increment Version' stage of the Jenkinsfile. So we just have to set the new `APP_NAME` variable. We can do it in an `environment` block right inside the 'deploy' stage like this:
+```yaml
+stage('Deploy Application') {
+    environment {
+        AWS_ACCESS_KEY_ID = credentials('jenkins-aws_access_key_id')
+        AWS_SECRET_ACCESS_KEY = credentials('jenkins-aws_secret_access_key')
+        APP_NAME = 'java-maven-app'
+    }
+    steps {
+        script {
+            echo 'deploying Docker image to EKS cluster...'
+            ...
+        }
+    }
+}
+```
+
+We cannot just execute `kubectl apply -f kubernetes/deployment.yaml` (or service.yaml), because these configuration files are actually template files. We first have to substitute the environment variable names with their values. To do this we use the command line tool `envsubst`, which takes a file, looks for env variable references and replaces them with their values. The final commands will then look like this:
+```yaml
+sh 'envsubst < kubernetes/deployment.yaml | kubectl apply -f -'
+sh 'envsubst < kubernetes/service.yaml | kubectl apply -f -'
+```
+
+### Install 'gettext-base' command line tool on Jenkins
+The `envsubst` command is not available out of the box in the Jenkins container. We have to install it.
+```sh
+ssh root@<jenkins-droplet-ip>
+
+# enter the container as root to be able to install gettext-base
+docker exec -u 0 -it <jenkins-container-id> bash
+
+# install the gettext-base package containing the envsubst tool
+apt-get update
+apt-get install gettext-base
+
+# check that envsubst is available
+which envsubst
+# => /usr/bin/envsubst
+
+# leave the Jenkins container
+exit
+
+# leave the droplet
+exit
+```
+
+### Create Secret for DockerHub Credentials
+When the deployment configuration file is applied to the EKS cluster, K8s must be able to pull the application image from the private DockerHub registry. For that K8s needs to know the credentials for that private registry. We make these credentials available in a K8s Secret. We could do this inside the Jenkins pipeline (apply a secret.yaml), but because this is a step that has to be executed only once, we can do it from our local machine.
+
+```sh
+# make sure we are connecting with the right cluster
+kubectl get nodes
+# NAME                                              STATUS   ROLES    AGE    VERSION
+# ip-192-168-48-96.eu-central-1.compute.internal    Ready    <none>   2d6h   v1.26.2-eks-a59e1f0
+# ip-192-168-64-248.eu-central-1.compute.internal   Ready    <none>   2d6h   v1.26.2-eks-a59e1f0
+
+# create the secret
+kubectl create secret docker-registry my-registry-key \
+  --docker-server=docker.io \
+  --docker-username=fsiegrist \
+  --docker-password=<password>
+
+kubectl get secrets
+# NAME              TYPE                             DATA   AGE
+# my-registry-key   kubernetes.io/dockerconfigjson   1      46s
+```
+
+Now we have to tell K8s to use this secret when pulling the image. This is done in the `deployment.yaml` file with these two lines added just before `containers:`:
+```yaml
+imagePullSecrets:
+  - name: my-registry-key
+```
+
+### Execute Jenkins Pipeline
+Add, commit and push the new branch to the Git repository. If we have configured the multibranch pipeline on Jenkins to build all branches, the new branch will be automatically detected, a new pipeline will be created and the build will be automatically started.
+
+After it has successfully finished, open a terminal on your local machine and check the deployment:
+```sh
+kubectl get pods
+# NAME                             READY   STATUS    RESTARTS   AGE
+# java-maven-app-f8c8b8d87-zdp48   1/1     Running   0          27s
+
+kubectl describe pod java-maven-app-f8c8b8d87-zdp48
+# in the Containers section we see that the image tag was successfully substituted with the updated version
+
+kubectl get deployments
+# NAME            READY   UP-TO-DATE   AVAILABLE   AGE
+# java-maven-app  1/1     1            1           4m34s
+
+kubectl get services
+# NAME             TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)   AGE
+# java-maven-app   ClusterIP   10.100.3.216   <none>        80/TCP    5m13s
+# kubernetes       ClusterIP   10.100.0.1     <none>        443/TCP   2d7h
+```
+
+</details>
+
+*****
