@@ -952,3 +952,13 @@ kubectl get pods -o wide
 </details>
 
 *****
+
+<details>
+<summary>Video: 8 - Jenkins Credentials Note on Best Practices</summary>
+<br />
+
+Instead of configuring credentials on Jenkins for our various admin users (e.g. on EC2 instance, EKS cluster, LKE cluster), it is strongly recommended to create dedicated Jenkins users on all of the platforms/environments (e.g. a jenkins service account on AWS), provide these jenkns users only the permissions they need, and configure their credentials on Jenkins server / multi-branch-pipeline.
+
+</details>
+
+*****
