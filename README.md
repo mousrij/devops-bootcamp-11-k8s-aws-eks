@@ -14,4 +14,5 @@ And finally it contains the following demo projects:
 - [Create AWS EKS Cluster with eksctl](./demo-projects/3-create-eks-cluster-eksclt/)
 - [Deploy to EKS Cluster from Jenkins Pipeline](./demo-projects/4-deploy-to-eks-from-jenkins/)
 - [Deploy to LKE Cluster from Jenkins Pipeline](./demo-projects/5-deploy-to-lke-from-jenkins/)
-
+- [CI/CD Pipeline With EKS and Private DockerHub Registry](./demo-projects/6-ci-cd-pipeline-with-eks-and-docker-hub/)
+- [CI/CD Pipeline With EKS and AWS ECR](./demo-projects/7-ci-cd-pipeline-with-eks-and-ecr/)
