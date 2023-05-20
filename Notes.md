@@ -1,4 +1,4 @@
-## Notes on the videos for Module 11 "Kubernetes on AQS - EKS"
+## Notes on the videos for Module 11 "Kubernetes on AWS - EKS"
 <br />
 
 <details>
