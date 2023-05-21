@@ -1019,7 +1019,7 @@ spec:
 
 ### Adjust Jenkinsfile
 The `IMAGE_TAG` environment variable gets already set in the 'Increment Version' stage of the Jenkinsfile. So we just have to set the new `APP_NAME` variable. We can do it in an `environment` block right inside the 'deploy' stage like this:
-```yaml
+```groovy
 stage('Deploy Application') {
     environment {
         AWS_ACCESS_KEY_ID = credentials('jenkins-aws_access_key_id')
@@ -1036,7 +1036,7 @@ stage('Deploy Application') {
 ```
 
 We cannot just execute `kubectl apply -f kubernetes/deployment.yaml` (or service.yaml), because these configuration files are actually template files. We first have to substitute the environment variable names with their values. To do this we use the command line tool `envsubst`, which takes a file, looks for env variable references and replaces them with their values. The final commands will then look like this:
-```yaml
+```groovy
 sh 'envsubst < kubernetes/deployment.yaml | kubectl apply -f -'
 sh 'envsubst < kubernetes/service.yaml | kubectl apply -f -'
 ```
@@ -1160,7 +1160,7 @@ kubectl get secrets
 
 ### Update Jenkinsfile
 In the "Build and Publish Docker Image" stage we use the repository url several times and it is also hardcoded in the `kubernetes/deployment.yaml` file. It makes sense to extract it to an environment variable. So we add an global environment block before all stages:
-```yaml
+```groovy
 environment {
     DOCKER_REPO_HOST = '369076538622.dkr.ecr.eu-central-1.amazonaws.com'
     DOCKER_REPO_URI = "${DOCKER_REPO_HOST}/java-maven-app"
@@ -1168,7 +1168,7 @@ environment {
 ```
 
 In the "Build and Publish Docker Image" stage we make use of these variables and adjust it like this:
-```yaml
+```groovy
 stage("Build and Publish Docker Image") {
     steps {
         script {
