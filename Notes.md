@@ -1116,3 +1116,104 @@ kubectl get services
 </details>
 
 *****
+
+<details>
+<summary>Video: 10 - Complete CI/CD Pipeline with EKS and ECR</summary>
+<br />
+
+Let's replace the private DockerHub registry with AWS ECR (Elastic Container Registry). In ECR we are not limited to just one private repository (as with DockerHub). So we can create a repository for each application and can use the image tag for the version only (and don't have to abuse it for the whole application name).
+
+### Create an ECR Repository
+Open your browser and login to your account of the [AWS Management Console](https://eu-central-1.console.aws.amazon.com/console/home?region=eu-central-1#). Open the ECR dashboard (Services > Containers > Elastic Container Registry) and press the "Get Started" button in the "Create a repository" box.
+
+Select 'Private' visibility, enter a name (e.g. java-maven-app) and press "Create repository".
+
+### Create Credentials for the ECR Repository in Jenkins
+First we need the username and password for our ECR repository. Open the ECR dashboard in the AWS Management Console and click on the 'java-maven-app' repository. Press the "View push commands" button. The first command can be used to `docker login` to the ECR:
+```sh
+aws ecr get-login-password --region eu-central-1 | docker login --username AWS --password-stdin 369076538622.dkr.ecr.eu-central-1.amazonaws.com
+```
+The first part (`aws ecr get-login-password --region eu-central-1`) retrieves the password which is then passed as stdin to the piped `docker login` command. We also see that the username is 'AWS'.
+
+On a Mac you can copy the password to the clipboard with the following command:
+```sh
+aws ecr get-login-password --region eu-central-1 | pbcopy
+```
+
+Now login to Jenkins Web Console, go to Dashboard > Manage Jenkins > Manage Credentials > System > Global credentials (unrestricted) and press "Add Credentials". Select the Kind "Username with password", enter the Username 'AWS', paste the Password you copied with the above command and enter an ID (e.g. ecr-credentials). Press "Create".
+
+This is all we need to allow Jenkins to push images to the ECR registry.
+
+### Create Secret for AWS ECR
+For pulling images from the ECR registry, K8s needs an according Secret holding the same credentials. We can use the command as in the last video (with updated options):
+```sh
+kubectl create secret docker-registry aws-registry-key \
+  --docker-server=369076538622.dkr.ecr.eu-central-1.amazonaws.com \
+  --docker-username=AWS \
+  --docker-password=$(aws ecr get-login-password --region eu-central-1)
+
+kubectl get secrets
+# NAME               TYPE                             DATA   AGE
+# aws-registry-key   kubernetes.io/dockerconfigjson   1      11s
+# my-registry-key    kubernetes.io/dockerconfigjson   1      13h
+```
+
+### Update Jenkinsfile
+In the "Build and Publish Docker Image" stage we use the repository url several times and it is also hardcoded in the `kubernetes/deployment.yaml` file. It makes sense to extract it to an environment variable. So we add an global environment block before all stages:
+```yaml
+environment {
+    DOCKER_REPO_HOST = '369076538622.dkr.ecr.eu-central-1.amazonaws.com'
+    DOCKER_REPO_URI = "${DOCKER_REPO_HOST}/java-maven-app"
+}
+```
+
+In the "Build and Publish Docker Image" stage we make use of these variables and adjust it like this:
+```yaml
+stage("Build and Publish Docker Image") {
+    steps {
+        script {
+            withCredentials([usernamePassword(credentialsId: 'ecr-credentials', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+                echo "building the docker image..."
+                sh "docker build -t ${DOCKER_REPO_URI}:${IMAGE_TAG} ."
+                
+                echo "publishing the docker image..."
+                sh "echo $PASSWORD | docker login -u $USERNAME --password-stdin ${DOCKER_REPO_HOST}"
+                sh "docker push ${DOCKER_REPO_URI}:${IMAGE_TAG}"
+            }
+        }
+    }
+}
+```
+
+In the `kubernetes/deployment.yaml` file we have to replace the image name:
+```yaml
+image: ${DOCKER_REPO_URI}:${IMAGE_TAG}
+```
+
+Also don't forget to adjust the secret name from `my-registry-key` to `aws-registry-key`.
+
+### Execute Jenkins Pipeline
+Add, commit and push the changes to a new branch called 'complete-pipeline-eks-ecr' of the java-maven-app project. If we have configured the multibranch pipeline on Jenkins to build all branches, the new branch will be automatically detected, a new pipeline will be created and the build will be automatically started.
+
+After it has successfully finished, open a terminal on your local machine and check the deployment:
+```sh
+kubectl get pods
+# NAME                             READY   STATUS    RESTARTS   AGE
+# java-maven-app-f9d749558-fjt64   1/1     Running   0          43s
+
+kubectl describe pod java-maven-app-f9d749558-fjt64
+# in the Containers section we see that the image was pulled from the ECR registry
+
+kubectl get deployments
+# NAME            READY   UP-TO-DATE   AVAILABLE   AGE
+# java-maven-app  1/1     1            1           2m55s
+
+kubectl get services
+# NAME             TYPE        CLUSTER-IP    EXTERNAL-IP   PORT(S)   AGE
+# java-maven-app   ClusterIP   10.100.83.4   <none>        80/TCP    3m12s
+# kubernetes       ClusterIP   10.100.0.1    <none>        443/TCP   2d21h
+```
+
+</details>
+
+*****
