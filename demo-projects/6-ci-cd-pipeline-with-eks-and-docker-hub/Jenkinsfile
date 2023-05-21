@@ -62,7 +62,7 @@ pipeline {
                         sh "git remote set-url origin https://${USERNAME}:${PASSWORD}@github.com/fsiegrist/devops-bootcamp-java-maven-app.git"
                         sh 'git add .'
                         sh 'git commit -m "jenkins: version bump"'
-                        sh 'git push origin HEAD:main'
+                        sh 'git push origin HEAD:complete-pipeline-eks-dockerhub'
                     }
                 }
             }
