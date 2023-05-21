@@ -75,7 +75,7 @@ spec:
 #### Steps to integrate the deploy step in the CI/CD pipeline
 **Step 1:** Set the APP_NAME env variable in the Jenkinsfile\
 The `IMAGE_TAG` environment variable gets already set in the 'Increment Version' stage of the Jenkinsfile. So we just have to set the new `APP_NAME` variable. We can do it in an `environment` block right inside the 'deploy' stage like this:
-```yaml
+```groovy
 stage('Deploy Application') {
     environment {
         AWS_ACCESS_KEY_ID = credentials('jenkins-aws_access_key_id')
@@ -93,7 +93,7 @@ stage('Deploy Application') {
 
 **Step 2:** Add the commands to substitute env variables and apply the configuration files\
 We cannot just execute `kubectl apply -f kubernetes/deployment.yaml` (or service.yaml), because these configuration files are actually template files. We first have to substitute the environment variable names with their values. To do this we use the command line tool `envsubst`, which takes a file, looks for env variable references and replaces them with their values. The final commands will then look like this:
-```yaml
+```groovy
 sh 'envsubst < kubernetes/deployment.yaml | kubectl apply -f -'
 sh 'envsubst < kubernetes/service.yaml | kubectl apply -f -'
 ```
@@ -149,7 +149,13 @@ imagePullSecrets:
   - name: my-registry-key
 ```
 
-**Step 6:** Execute the Jenkins pipeline
+**Step 6:** Update the branch name in the git push command\
+In the "Commit Version Update" stage we have to adjust the branch in the `git push` command:
+```groovy
+sh 'git push origin HEAD:complete-pipeline-eks-dockerhub'
+```
+
+**Step 7:** Execute the Jenkins pipeline
 We add, commit and push the new branch to the Git repository. If we have configured the multibranch pipeline on Jenkins to build all branches, the new branch will be automatically detected, a new pipeline will be created and the build will be automatically started.
 
 After it has successfully finished, we open a terminal on your local machine and check the deployment:
