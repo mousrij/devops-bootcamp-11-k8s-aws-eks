@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: java-mysql-app-deployment
+  labels:
+    app: java-mysql-app
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: java-mysql-app
+  template:
+    metadata:
+      labels:
+        app: java-mysql-app
+    spec:
+      imagePullSecrets:
+      - name: my-registry-key
+      containers:
+      - name: javamysqlapp
+        image: fsiegrist/fesi-repo:bootcamp-java-mysql-project-1.2-SNAPSHOT
+        ports:
+        - containerPort: 8080
+        env:
+         - name: DB_USER
+           valueFrom:
+             secretKeyRef:
+               name: db-secret
+               key: db_user
+         - name: DB_PWD
+           valueFrom:
+             secretKeyRef:
+               name: db-secret
+               key: db_pwd
+         - name: DB_NAME
+           valueFrom:
+             secretKeyRef:
+               name: db-secret
+               key: db_name
+         - name: DB_SERVER
+           valueFrom:
+             configMapKeyRef:
+              name: db-config
+              key: db_server
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: java-mysql-app-service
+spec:
+  selector:
+    app: java-mysql-app
+  ports:
+  - protocol: TCP
+    port: 8080
+    targetPort: 8080
