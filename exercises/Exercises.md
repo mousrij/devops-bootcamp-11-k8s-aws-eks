@@ -266,6 +266,7 @@ Now your application is running. And when you or others make changes to it, Jenk
 
 **Steps to solve the tasks:**
 
+_TODO_
 
 </details>
 
@@ -285,6 +286,7 @@ So, company wants to use ECR instead, again to have everything on 1 platform and
 
 **Steps to solve the tasks:**
 
+_TODO_
 
 </details>
 
@@ -304,6 +306,7 @@ So you suggest to your manager, that you will be able to save the company some i
 
 **Steps to solve the tasks:**
 
+_TODO_
 
 </details>
 
