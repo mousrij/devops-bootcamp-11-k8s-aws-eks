@@ -758,6 +758,32 @@ users:
       - demo-cluster
       command: aws
 ```
+```
+apiVersion: v1
+clusters:
+- cluster:
+    certificate-authority-data: LS0tLS1CRUdJTiBDRVJUSUZJQ0FUR...
+    server: https://---.yl4.eu-north-1.eks.amazonaws.com
+  name: kubernetes
+contexts:
+- context:
+    cluster: kubernetes
+    user: aws
+  name: aws
+current-context: aws
+kind: Config
+preferences: {}
+users:
+- name: aws
+  user:
+    exec:
+      apiVersion: client.authentication.k8s.io/v1beta1
+      command: aws-iam-authenticator
+      args:
+        - "token"
+        - "-i"
+        - "eks-1"
+```
 
 In the Jenkins container we don't have aws-cli installed, so we have to replace the command `aws eks get-token --region eu-central-1 --cluster-name demo-cluster` which will be called with every `kubectl` command to authenticate against the AWS account and the EKS cluster with a respective `aws-iam-authenticator token -i demo-cluster` command. So replace the `exec` section in the file with the following:
 ```yaml
